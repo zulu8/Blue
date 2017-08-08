@@ -1,3 +1,21 @@
+
+$theXmlVariable = [XML] "
+<note>
+<to>Tove</to>
+<from>Jani</from>
+<heading>Reminder</heading>
+<body>Don't forget me this weekend!</body>
+</note>
+"
+
+echo $theXmlVariable.note.to
+
+echo $theXmlVariable.note.body
+
+$Data = [Xml] (Get-Content Sample.xml)
+
+Import-Clixml
+
 # Sysmon Install and Configure
 	# Install
 	if ((Get-Service Sysmon) -ne $null) {

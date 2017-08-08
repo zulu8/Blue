@@ -38,6 +38,24 @@ $targetSystems = @(
     'pc02win10'
 )
 
+# Define Desired State for Registry Entries
+$regConfig = @"
+regKey,name,value,type
+"HKLM:\SYSTEM\CurrentControlSet\Control\Lsa","scenoapplylegacyauditpolicy",1,"DWord"
+"HKLM:\System\CurrentControlSet\Control\Lsa\Audit","SpecialGroups",$specialGroupString,"String"
+"HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
+"HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
+"HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription","EnableTranscripting",1,"DWord"
+"HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
+"HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
+"HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
+"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
+"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","EnableTranscripting",1,"DWord"
+"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
+"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
+"@
+
+
 
 function Configure-Sensors
 {
@@ -56,28 +74,52 @@ function Configure-Sensors
 		# Backup Current Audit Config to C:\<hostname>.auditpolicy.orig.csv
 		# Set New Audit Policy
 		Invoke-Command -Session $s -ScriptBlock {
-			auditpol.exe /backup /file:C:\$(hostname).audit.orig.csv;
-			auditpol.exe /set /subcategory:"Special Logon","Logon","Directory Service Access","Directory Service Changes","Credential Validation","Kerberos Service Ticket Operations","Kerberos Authentication Service","Computer Account Management","Other Account Management Events","Security Group Management","User Account Management","DPAPI Activity","Process Creation","IPsec Driver","Security State Change","Security System Extension","System Integrity","Removable Storage" /success:enable /failure:enable;
-			auditpol.exe /set /subcategory:"Logoff","Account Lockout" /success:enable;
+			&auditpol.exe /backup /file:C:\$(hostname).audit.orig.csv
+			&auditpol.exe /set /subcategory:"Special Logon","Logon","Directory Service Access","Directory Service Changes","Credential Validation","Kerberos Service Ticket Operations","Kerberos Authentication Service","Computer Account Management","Other Account Management Events","Security Group Management","User Account Management","DPAPI Activity","Process Creation","IPsec Driver","Security State Change","Security System Extension","System Integrity","Removable Storage" /success:enable /failure:enable
+			&auditpol.exe /set /subcategory:"Logoff","Account Lockout" /success:enable
 		}
 
 		# Get Auditpol Config Backup and Store to Backup Folder
 		$auditBackup = Invoke-Command -Session $s -ScriptBlock {
-			gc "C:\$(hostname).audit.orig.csv"
+			Get-Content "C:\$(hostname).audit.orig.csv"
 			Remove-Item "C:\$(hostname).audit.orig.csv"
 		}
-		$auditBackup | out-file "$backupDirectory\$i.audit.orig.csv"
+		$auditBackup | out-file "$backupDirectory\$i.audit.orig.csv" -Force
 
 	# PowerShell and WEF Config
-		# Configure Registry
-		Invoke-Command -Session $s -FilePath .\Deploy-BlueRegistry.ps1 -ArgumentList $collectorServer,$transcriptDirectory,$specialGroupString
+		$regBackup = @()
 
-		# Get Registry Config Backup and Store to Backup Folder
-		$regBackup = Invoke-Command -Session $s -ScriptBlock {
-			gc "C:\$(hostname).reg.orig.csv"
-			Remove-Item "C:\$(hostname).reg.orig.csv"
-		}
-		$regBackup | out-file "$backupDirectory\$i.reg.orig.csv"
+		# Iterate over array of objects containing desired registry configurations, document original config
+		$regBackup = Invoke-Command -Session $s -Script {
+			param([string[]]$regConfig)
+			$regConfig | ConvertFrom-Csv | ForEach-Object {
+				if (-Not (Test-Path $_.regKey)) {
+					# Registry path does not exist -> create and document DNE
+					Write-Warning "Path $($_.regKey) does not exist"
+					$null = New-Item $_.regKey -Force
+					New-Object PSObject -Property @{regKey = $_.regKey; name = "DNE"; value = "DNE"; type = "DNE"}
+				}
+				else {
+					if (Get-ItemProperty $_.regKey | Select-Object -Property $_.name) {
+						# Registry key exists. Document value
+						Write-Warning "Key $($_.regKey) if $(Get-ItemProperty $_.regKey | Select-Object -Property $_.name)"
+						Write-Warning "Property $($_.name) exists. Documenting Value: $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $_.name)"
+						New-Object PSObject -Property @{regKey = $_.regKey; name = $_.name; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $_.name); type = $_.type}
+					}
+					else {
+						# Registry key does not exist. Document DNE
+						Write-Warning "Property $($_.name) DNE. Documenting Null"
+						New-Object PSObject -Property @{regKey = $_.regKey; name = $_.name; value = "DNE"; type = "DNE"}
+					}
+				}
+			} | ConvertTo-Csv -NoTypeInformation
+			# Set Registry Key to Desired Value
+			$regConfig | ConvertFrom-Csv | ForEach-Object {
+				Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
+			}
+		} -Args (,$regConfig)
+
+		$regBackup | out-file "$backupDirectory\$i.reg.orig.csv" -Force
 
 	# Cleanup Session
 		Remove-PSSession $s
@@ -85,20 +127,20 @@ function Configure-Sensors
 }
 
 
-function Cleanup-Sensors
+function Restore-Sensors
 {
 	foreach ($i in $targetSystems)
 	{
 		$s = New-PSSession -ComputerName $i
 	# Audit Cleanup
 		# Read in original audit configuration
-		$auditBackup = gc "$backupDirectory\$i.audit.orig.csv"
+		$auditBackup = Get-Content "$backupDirectory\$i.audit.orig.csv"
 
 		# Restore original config
 		Invoke-Command -Session $s -Script {
 			param([string[]]$auditBackup)
 			$auditBackup | Out-File "C:\$(hostname).audit.orig.csv"
-			auditpol.exe /restore /file:C:\$(hostname).audit.orig.csv
+			&auditpol.exe /restore /file:C:\$(hostname).audit.orig.csv
 			Remove-Item "C:\$(hostname).audit.orig.csv"
 		} -Args (,$auditBackup)
 
@@ -123,9 +165,9 @@ function Cleanup-Sensors
 					Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
 				}
 			}
-		} -Args (,$regBackup)
+		} -Args (,$regBackup) -ErrorAction SilentlyContinue
 
-	# System
+	# Sysmon
 		#Uninstall:  Sysmon.exe –u
 
 	# Cleanup Session
