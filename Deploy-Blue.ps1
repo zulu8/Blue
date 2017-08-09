@@ -123,13 +123,13 @@ function Configure-Sensors
 						if ($_.regKey -like "*SubscriptionManager*") {
 							Write-Warning "RegKey is Like SubscriptionManager"
 							Write-Warning "Property = $($_.name)"
-							$global:wecNum = 1
+							$wecNum = 1
 							# Backup each currently configured WEC server.
-							while ( (Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$global:wecNum) -ErrorAction SilentlyContinue) ) {
-								Write-Warning "RegKey with property = $global:wecNum exists"
-								New-Object PSObject -Property @{regKey = $_.regKey; name = $global:wecNum; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$global:wecNum)); type = $_.type}
+							while ( (Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$wecNum) -ErrorAction SilentlyContinue) ) {
+								Write-Warning "RegKey with property = $wecNum exists"
+								New-Object PSObject -Property @{regKey = $_.regKey; name = $wecNum; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$wecNum)); type = $_.type}
 								Write-Warning "Incrementing wecNum"
-								$global:wecNum++
+								$wecNum++
 							}
 						}
 						# Backup all non-SubscriptionManager values.
@@ -144,18 +144,22 @@ function Configure-Sensors
 					}
 				}
 			} | ConvertTo-Csv -NoTypeInformation
-			Write-Warning "wecNum = $global:wecNum"
+			Write-Warning "wecNum = $wecNum"
 			# Set Registry Key to Desired Value
 			$regConfig | ConvertFrom-Csv | ForEach-Object {
 				if ($_.regKey -like "*SubscriptionManager*") {
 					# Add our configuration for WEC SubscriptionManager to the list instead of overwrite
-					Set-ItemProperty $_.regKey -Name $global:wecNum -Value $_.value -Type $_.type
+					Set-ItemProperty $_.regKey -Name $wecNum -Value $_.value -Type $_.type
 				}
 				else {
 					Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
 				}
 			}
 		} -Args (,$regConfig)
+
+		$global:wecNum = Invoke-Command -Session $s -Script {$wecNum}
+		Write-Warning "wecNum = $wecNum"
+		$wecNum | out-file "$backupDirectory\$i.wecNum.txt" -Force
 
 		$regBackup | out-file "$backupDirectory\$i.reg.orig.csv" -Force
 
@@ -185,6 +189,9 @@ function Restore-Sensors
 	# PowerShell and WEF Config
 		# Configure Registry
 		$regBackup = gc "$backupDirectory\$i.reg.orig.csv"
+		#$wecNum = gc "$backupDirectory\$i.wecNum.txt"
+		Write-Warning "wecNum = $Global:wecNum"
+
 
 		# Restore original registry config
 		Invoke-Command -Session $s -Script {
@@ -192,22 +199,25 @@ function Restore-Sensors
 			$regBackup | ConvertFrom-Csv | ForEach-Object {
 				if ($_.name -eq "DNE") {
 					Write-Warning "Removing Path: $($_.regKey)"
-					Remove-Item $_.regKey
+					Remove-Item $_.regKey -ErrorAction SilentlyContinue
 				}
 				elseif ($_.value -eq "DNE") {
 					Write-Warning "Removing Key: $($_.name) with Value: $($_.value)"
-					Remove-ItemProperty $_.regKey -Name $_.name
+					Remove-ItemProperty $_.regKey -Name $_.name -ErrorAction SilentlyContinue
 				}
 				else {
 					Write-Warning "On $(hostname) name: $($_.name) value: $($_.value) type: $($_.type)"
 					Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
 					if ($_.regKey -like "*SubscriptionManager*") {
+						Write-Warning "RegKey is Like SubscriptionManager"
+						Write-Warning "Property = $($_.name)"
 						# Add our configuration for WEC SubscriptionManager to the list instead of overwrite
-						Remove-ItemProperty $_.regKey -Name $global:wecNum  #-Value $_.value -Type $_.type
+						Write-Warning "wecNum = $Using:wecNum"
+						Remove-ItemProperty $_.regKey -Name $Using:wecNum  -ErrorAction SilentlyContinue
 					}
 				}
 			}
-		} -Args (,$regBackup) -ErrorAction SilentlyContinue
+		} -Args (,$regBackup)
 
 	# Sysmon
 		#Uninstall:  Sysmon.exe –u
