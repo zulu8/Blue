@@ -1,13 +1,27 @@
 <#
 .SYNOPSIS
-    Deploys enterprise auditing and logging configurations for Blue Team
-    Operations.
+    Remotely configures auditing and logging for Blue Team Operations wihtout
+    reliance on Active Directory or Group Policy.
 
 .DESCRIPTION
+	Given:
+		1) a list of hostnames as scope
+		2) a FQDN of the designated Windows Event Collector Server
+		3) a directory for backing up current configs
+		4) an smb share for remotely saving transcripts
+	The following script will remotely set advancedaudit levels, enable
+	command line process auditing, enable powershell transcription, enable
+	powershell script block logging, configure Windows Event Forwarding,
+	install and configure Sysmon.
+
+	Configure-Sensors
+	 	configures the above listed settings
+	Restore-Sensors
+		returns systems to their original configuration
 
 .EXAMPLE
 	Configure-Sensors
-	CleanUp-Sensors
+	Restore-Sensors
 
 .NOTES
   Author:
@@ -30,42 +44,43 @@ $backupDirectory = "C:\Backups"
 # Enter the path to store all hashes of configs. This is required for monitoring deployed configs.
 $transcriptDirectory = "\\DC01\Transcripts"
 
-# Hash directory for monitoring
-#$hashDirectory = "\\DC01\Hashes"
+# Sysmon Configuration File
+$symonConfigFile = "C:\example2.xml"
 
 # Define all target systems in scope FQDN or Netbios name
 $targetSystems = @(
     'pc02win10'
 )
 
+# Setup Windows Event Collector Server
+Invoke-Command -ComputerName $collectorServer -ScriptBlock {wecutil qc /quiet}
+
+# Create Group for Special Logon Auditing (Event ID 4964). Add Suspects to Group.
+$specialAuditGroup = 'SpecialAudit'
+New-ADGroup $specialAuditGroup -GroupScope "Global"
+$specialGroupString = "S-1-5-113;$((get-adgroup $specialAuditGroup).sid.Value);$((get-adgroup 'domain admins').sid.Value);$((get-adgroup 'enterprise admins').sid.Value)"
+
 # Define Desired State for Registry Entries
+$global:wecNum = 1
 $regConfig = @"
 regKey,name,value,type
 "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa","scenoapplylegacyauditpolicy",1,"DWord"
 "HKLM:\System\CurrentControlSet\Control\Lsa\Audit","SpecialGroups",$specialGroupString,"String"
 "HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
-"HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
 "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription","EnableTranscripting",1,"DWord"
 "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
 "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
+"HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
 "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
-"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
 "HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","EnableTranscripting",1,"DWord"
 "HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
 "HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
+"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
 "@
-
 
 
 function Configure-Sensors
 {
-	# Setup Windows Event Collector Server
-	Invoke-Command -ComputerName $collectorServer -ScriptBlock {wecutil qc /quiet}
-
-	# Create Group for Special Logon Auditing (Event ID 4964). Add Suspects to Group.
-	$specialAuditGroup = 'SpecialAudit'
-	New-ADGroup $specialAuditGroup -GroupScope "Global"
-	$specialGroupString = "S-1-5-113;$((get-adgroup $specialAuditGroup).sid.Value);$((get-adgroup 'domain admins').sid.Value);$((get-adgroup 'enterprise admins').sid.Value)"
 
 	foreach ($i in $targetSystems)
 	{
@@ -104,7 +119,23 @@ function Configure-Sensors
 						# Registry key exists. Document value
 						Write-Warning "Key $($_.regKey) if $(Get-ItemProperty $_.regKey | Select-Object -Property $_.name)"
 						Write-Warning "Property $($_.name) exists. Documenting Value: $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $_.name)"
-						New-Object PSObject -Property @{regKey = $_.regKey; name = $_.name; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $_.name); type = $_.type}
+						# Handle Cases where SubscriptionManager value already exists.
+						if ($_.regKey -like "*SubscriptionManager*") {
+							Write-Warning "RegKey is Like SubscriptionManager"
+							Write-Warning "Property = $($_.name)"
+							$global:wecNum = 1
+							# Backup each currently configured WEC server.
+							while ( (Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$global:wecNum) -ErrorAction SilentlyContinue) ) {
+								Write-Warning "RegKey with property = $global:wecNum exists"
+								New-Object PSObject -Property @{regKey = $_.regKey; name = $global:wecNum; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$global:wecNum)); type = $_.type}
+								Write-Warning "Incrementing wecNum"
+								$global:wecNum++
+							}
+						}
+						# Backup all non-SubscriptionManager values.
+						else {
+							New-Object PSObject -Property @{regKey = $_.regKey; name = $_.name; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $_.name); type = $_.type}
+						}
 					}
 					else {
 						# Registry key does not exist. Document DNE
@@ -113,9 +144,16 @@ function Configure-Sensors
 					}
 				}
 			} | ConvertTo-Csv -NoTypeInformation
+			Write-Warning "wecNum = $global:wecNum"
 			# Set Registry Key to Desired Value
 			$regConfig | ConvertFrom-Csv | ForEach-Object {
-				Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
+				if ($_.regKey -like "*SubscriptionManager*") {
+					# Add our configuration for WEC SubscriptionManager to the list instead of overwrite
+					Set-ItemProperty $_.regKey -Name $global:wecNum -Value $_.value -Type $_.type
+				}
+				else {
+					Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
+				}
 			}
 		} -Args (,$regConfig)
 
@@ -163,6 +201,10 @@ function Restore-Sensors
 				else {
 					Write-Warning "On $(hostname) name: $($_.name) value: $($_.value) type: $($_.type)"
 					Set-ItemProperty $_.regKey -Name $_.name -Value $_.value -Type $_.type
+					if ($_.regKey -like "*SubscriptionManager*") {
+						# Add our configuration for WEC SubscriptionManager to the list instead of overwrite
+						Remove-ItemProperty $_.regKey -Name $global:wecNum  #-Value $_.value -Type $_.type
+					}
 				}
 			}
 		} -Args (,$regBackup) -ErrorAction SilentlyContinue
