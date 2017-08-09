@@ -9,7 +9,7 @@
 		2) a FQDN of the designated Windows Event Collector Server
 		3) a directory for backing up current configs
 		4) an smb share for remotely saving transcripts
-	The following script will remotely set advancedaudit levels, enable
+	The following script will remotely set advanced audit levels, enable
 	command line process auditing, enable powershell transcription, enable
 	powershell script block logging, configure Windows Event Forwarding,
 	install and configure Sysmon.
@@ -61,7 +61,6 @@ New-ADGroup $specialAuditGroup -GroupScope "Global"
 $specialGroupString = "S-1-5-113;$((get-adgroup $specialAuditGroup).sid.Value);$((get-adgroup 'domain admins').sid.Value);$((get-adgroup 'enterprise admins').sid.Value)"
 
 # Define Desired State for Registry Entries
-$global:wecNum = 1
 $regConfig = @"
 regKey,name,value,type
 "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa","scenoapplylegacyauditpolicy",1,"DWord"
@@ -99,7 +98,6 @@ function Configure-Sensors
 			Get-Content "C:\$(hostname).audit.orig.csv"
 			Remove-Item "C:\$(hostname).audit.orig.csv"
 		}
-		$auditBackup | out-file "$backupDirectory\$i.audit.orig.csv" -Force
 
 	# PowerShell and WEF Config
 		$regBackup = @()
@@ -124,7 +122,7 @@ function Configure-Sensors
 							Write-Warning "RegKey is Like SubscriptionManager"
 							Write-Warning "Property = $($_.name)"
 							$wecNum = 1
-							# Backup each currently configured WEC server.
+							# Backup each currently configured SubscriptionManager values.
 							while ( (Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$wecNum) -ErrorAction SilentlyContinue) ) {
 								Write-Warning "RegKey with property = $wecNum exists"
 								New-Object PSObject -Property @{regKey = $_.regKey; name = $wecNum; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $([string]$wecNum)); type = $_.type}
@@ -132,7 +130,7 @@ function Configure-Sensors
 								$wecNum++
 							}
 						}
-						# Backup all non-SubscriptionManager values.
+						# Backup all non-SubscriptionManager values to array.
 						else {
 							New-Object PSObject -Property @{regKey = $_.regKey; name = $_.name; value = $(Get-ItemProperty $_.regKey | Select-Object -ExpandProperty $_.name); type = $_.type}
 						}
@@ -157,11 +155,22 @@ function Configure-Sensors
 			}
 		} -Args (,$regConfig)
 
+		# Pull wecNum value from remote system
 		$global:wecNum = Invoke-Command -Session $s -Script {$wecNum}
 		Write-Warning "wecNum = $wecNum"
-		$wecNum | out-file "$backupDirectory\$i.wecNum.txt" -Force
 
-		$regBackup | out-file "$backupDirectory\$i.reg.orig.csv" -Force
+		# Backup all configs to single .ps1 file named <hostname>.config.ps1
+		Write-Output "`$auditBackup `= `@`"" | Out-File "$backupDirectory\$i.config.ps1" -Force
+		$auditBackup | Add-Content "$backupDirectory\$i.config.ps1"
+		Write-Output "`"`@" | Add-Content "$backupDirectory\$i.config.ps1"
+		Write-Output "" | Add-Content "$backupDirectory\$i.config.ps1"
+
+		Write-Output "`$regBackup `= `@`"" | Add-Content "$backupDirectory\$i.config.ps1"
+		$regBackup | Add-Content "$backupDirectory\$i.config.ps1"
+		Write-Output "`"`@" | Add-Content "$backupDirectory\$i.config.ps1"
+		Write-Output "" | Add-Content "$backupDirectory\$i.config.ps1"
+
+		Write-Output "`$wecNum `= $wecNum" | Add-Content "$backupDirectory\$i.config.ps1"
 
 	# Cleanup Session
 		Remove-PSSession $s
@@ -174,10 +183,11 @@ function Restore-Sensors
 	foreach ($i in $targetSystems)
 	{
 		$s = New-PSSession -ComputerName $i
-	# Audit Cleanup
-		# Read in original audit configuration
-		$auditBackup = Get-Content "$backupDirectory\$i.audit.orig.csv"
 
+		# Read in original configuration
+		. ".\$i.config.ps1"
+
+	# Audit Cleanup
 		# Restore original config
 		Invoke-Command -Session $s -Script {
 			param([string[]]$auditBackup)
@@ -188,10 +198,7 @@ function Restore-Sensors
 
 	# PowerShell and WEF Config
 		# Configure Registry
-		$regBackup = gc "$backupDirectory\$i.reg.orig.csv"
-		#$wecNum = gc "$backupDirectory\$i.wecNum.txt"
-		Write-Warning "wecNum = $Global:wecNum"
-
+		Write-Warning "wecNum = $wecNum"
 
 		# Restore original registry config
 		Invoke-Command -Session $s -Script {
