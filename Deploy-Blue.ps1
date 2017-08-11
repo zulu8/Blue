@@ -52,7 +52,7 @@ $transcriptDirectory = "\\DC01\Transcripts"
 # Sysmon Configuration File
 $sysmonConfigFile = "C:\exampleSysmonConf.xml"
 
-# Define all target systems in scope FQDN or Netbios name
+# Define all target systems in scope. Use Hostname.
 $targetSystems = @(
     'pc02win10'
 )

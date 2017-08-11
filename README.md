@@ -8,7 +8,6 @@ These instructions will get you a copy of the project up and running on your loc
 
 ### Prerequisites
 
-What things you need to install the software and how to install them
 * PowerShell 5.0+
 * Windows 7/2008r2+
 * Administrator credentials
@@ -31,13 +30,13 @@ $transcriptDirectory = "\\DC01\Transcripts"
 # Sysmon Configuration File
 $sysmonConfigFile = "C:\exampleSysmonConf.xml"
 
-# Define all target systems in scope FQDN or Netbios name
+# Define all target systems in scope. Use Hostname.
 $targetSystems = @(
     'pc02win10'
 )
 ```
 
-The following variables are optional. They are used to determine the desired configuration on you target systems:
+The following variables determine the desired configuration on you target systems. The default values are very loud.
 
 ```
 # Create Group for Special Logon Auditing (Event ID 4964). Add Suspects to Group.
@@ -62,7 +61,7 @@ PS C:\> .\Deploy-Blue.ps1
 
 ### Configure Sensors
 
-If the script initialization is without error, begin your remote sensor configuration.
+If the script runs without error, begin your remote sensor configuration.
 
 ```
 PS C:\> Configure-Sensors
@@ -85,8 +84,6 @@ When the task is complete simply invoke the Restore-Sensors function and the ori
 PS C:\> Restore-Sensors
 ```
 
-
-
 ## Built With
 
 ## Contributing
@@ -95,7 +92,7 @@ PS C:\> Restore-Sensors
 
 ## Authors
 
-See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
+See also the list of [contributors](https://github.com/zulu8/Blue/graphs/contributors) who participated in this project.
 
 ## License
 
