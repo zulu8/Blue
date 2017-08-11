@@ -24,6 +24,7 @@
 		Windows 10 (PS Version 5.0)
 
 .EXAMPLE
+	./Deploy-Blue.ps1
 	Configure-Sensors
 	Restore-Sensors
 
@@ -241,7 +242,6 @@ function Configure-Sensors
 			}
 			else {
 				Write-Warning "Sysmon DNE. Installing"
-				#Copy-Item "C:\Sysmon64.exe" -Destination "C:\Sysmon64.exe" -ToSession $s
 				&C:\Sysmon64.exe -i -accepteula > null 2>&1
 				Write-Warning "Changing config to desired state."
 				$sysmonConfig | Out-File "C:\sysmonConfig.xml"
@@ -337,11 +337,6 @@ function Restore-Sensors
 		}
 		else {
 			Write-Warning "Sysmon present before deployment. Do nothing."
-			#Invoke-Command -Session $s -ScriptBlock {
-			#	param([string[]]$sysmonBackup)
-			#	$sysmonBackup | Out-File "C:\$(hostname).sysmon.orig.xml" -Force
-			#	#&sysmon -c "C:\$(hostname).sysmon.orig.xml"
-			#} -Args (,$sysmonBackup)
 		}
 
 
