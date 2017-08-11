@@ -19,6 +19,10 @@
 	Restore-Sensors
 		returns systems to their original configuration
 
+	Tested on:
+		Windows Server 2012R2 (PS Version 5.1)
+		Windows 10 (PS Version 5.0)
+
 .EXAMPLE
 	Configure-Sensors
 	Restore-Sensors
@@ -108,7 +112,7 @@ $sysmonConfig = @"
 	<RawAccessRead onmatch="include">
      <Image condition="contains">C:\Windows\System32\</Image>
     <Image condition="contains">C:\Users</Image>
-    <Image condition="contains">C:\$recycle.bin</Image>
+    <Image condition="contains">C:\`$recycle.bin</Image>
 	</RawAccessRead>
 	<!-- Log all file modified creation time -->
 	<FileCreateTime onmatch="exclude"/>
@@ -243,6 +247,7 @@ function Configure-Sensors
 				$sysmonConfig | Out-File "C:\sysmonConfig.xml"
 				&C:\Sysmon64.exe -c "C:\sysmonConfig.xml" > null 2>&1
 				Remove-Item "C:\Sysmon64.exe"
+				Remove-Item "C:\sysmonConfig.xml"
 				$sysmonBackup = "DNE"
 				$sysmonBackup
 			}
