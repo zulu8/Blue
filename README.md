@@ -1,6 +1,6 @@
 # Blue Team Scripts
 
-One Paragraph of project description goes here
+This project is the result of blue team tasks where the client restricts access to or usage of group policy management. Most advanced security and auditing features rely heavily on group policy for deployment. Deploy-Blue.ps1 is an attempt to bypass group policy and enact the changes necessary within the scope to enable blue team operations.
 
 ## Getting Started
 
@@ -9,70 +9,91 @@ These instructions will get you a copy of the project up and running on your loc
 ### Prerequisites
 
 What things you need to install the software and how to install them
+* PowerShell 5.0+
+* Windows 7/2008r2+
+* Administrator credentials
+* Designated system for collection
+
+### Initial Configuration
+
+Before you can begin configuration is required. The following variables must be set in Deploy-Blue.ps1 in accordance with your environment:
 
 ```
-Give examples
+# Enter the FQDN of the Windows Event Collector Server
+$collectorServer = "dc01.zulu8.info"
+
+# Enter the path to store all original system configurations
+$backupDirectory = "C:\Backups"
+
+# Enter the path to store all powershell transcripts
+$transcriptDirectory = "\\DC01\Transcripts"
+
+# Sysmon Configuration File
+$sysmonConfigFile = "C:\exampleSysmonConf.xml"
+
+# Define all target systems in scope FQDN or Netbios name
+$targetSystems = @(
+    'pc02win10'
+)
 ```
 
-### Installing
-
-A step by step series of examples that tell you have to get a development env running
-
-Say what the step will be
+The following variables are optional. They are used to determine the desired configuration on you target systems:
 
 ```
-Give the example
-```
+# Create Group for Special Logon Auditing (Event ID 4964). Add Suspects to Group.
+$specialAuditGroup
+$specialGroupString
 
-And repeat
-
-```
-until finished
-```
-
-End with an example of getting some data out of the system or using it for a little demo
-
-## Running the tests
-
-Explain how to run the automated tests for this system
-
-### Break down into end to end tests
-
-Explain what these tests test and why
-
-```
-Give an example
-```
-
-### And coding style tests
-
-Explain what these tests test and why
-
-```
-Give an example
+# Define Desired State for Registry Entries
+$regConfig
 ```
 
 ## Deployment
 
-Add additional notes about how to deploy this on a live system
+Once your script is configured, directories created, and permissions set you can begin execution.
+
+### Initialize
+
+Simply executing the script without argument will prepare your environment for the sensor configurations. The script is designed to be run on the WEC Server.
+
+```
+PS C:\> .\Deploy-Blue.ps1
+```
+
+### Configure Sensors
+
+If the script initialization is without error, begin your remote sensor configuration.
+
+```
+PS C:\> Configure-Sensors
+```
+
+### Configure Supporting Tasks and Conduct Blue Team Ops
+
+Beyond the scope of this script are the remaining tasks to fully setup your blue team/threat hunting environment.
+
+* Configure WEF Subscriptions
+* Import data into SIEM
+* Query and Alert on data provided
+* Catch bad guys
+
+### Restore Sensors
+
+When the task is complete simply invoke the Restore-Sensors function and the original state will be configured.
+
+```
+PS C:\> Restore-Sensors
+```
+
+
 
 ## Built With
 
-* [Dropwizard](http://www.dropwizard.io/1.0.2/docs/) - The web framework used
-* [Maven](https://maven.apache.org/) - Dependency Management
-* [ROME](https://rometools.github.io/rome/) - Used to generate RSS Feeds
-
 ## Contributing
-
-Please read [CONTRIBUTING.md](https://gist.github.com/PurpleBooth/b24679402957c63ec426) for details on our code of conduct, and the process for submitting pull requests to us.
 
 ## Versioning
 
-We use [SemVer](http://semver.org/) for versioning. For the versions available, see the [tags on this repository](https://github.com/your/project/tags).
-
 ## Authors
-
-* **Billie Thompson** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)
 
 See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
 
@@ -82,6 +103,3 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 
 ## Acknowledgments
 
-* Hat tip to anyone who's code was used
-* Inspiration
-* etc
