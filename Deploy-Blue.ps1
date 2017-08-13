@@ -9,10 +9,13 @@
 		2) a FQDN of the designated Windows Event Collector Server
 		3) a directory for backing up current configs
 		4) an smb share for remotely saving transcripts
-	The following script will remotely set advanced audit levels, enable
-	command line process auditing, enable powershell transcription, enable
-	powershell script block logging, configure Windows Event Forwarding,
-	install and configure Sysmon.
+	The following script will remotely
+		set advanced audit levels,
+		enable command line process auditing,
+		enable powershell transcription,
+		enable powershell script block logging,
+		configure Windows Event Forwarding,
+		install and configure Sysmon.
 
 	Configure-Sensors
 	 	configures the above listed settings
@@ -27,6 +30,7 @@
 	./Deploy-Blue.ps1
 	Configure-Sensors
 	Restore-Sensors
+	Restart-Computer -ComputerName <target>
 
 .NOTES
   Author:
@@ -46,6 +50,11 @@ $collectorServer = "dc01.zulu8.info"
 # Enter the path to store all original system configurations
 $backupDirectory = "C:\Backups"
 
+if (!(Test-Path $backupDirectory)) {
+	Write-Output "Backup Directory DNE. Creating"
+	New-Item $backupDirectory -type directory
+}
+
 # Enter the path to store all powershell transcripts
 $transcriptDirectory = "\\DC01\Transcripts"
 
@@ -54,11 +63,29 @@ $sysmonConfigFile = "C:\exampleSysmonConf.xml"
 
 # Define all target systems in scope. Use Hostname.
 $targetSystems = @(
-    'pc02win10'
+    'pc03win10'
+    'pc04win10'
+#    'dc01'
 )
 
 # Setup Windows Event Collector Server
-Invoke-Command -ComputerName $collectorServer -ScriptBlock {wecutil qc /quiet}
+#Invoke-Command -ComputerName $collectorServer -ScriptBlock {wecutil qc /quiet}
+if ("$env:computername.$env:userdnsdomain" -like $collectorServer) {
+	wecutil qc /quiet
+	winrm quickconfig -force
+}
+else {
+	Write-Error "This script is designed to be run on the WEC server."
+}
+# wevtutil gl security -> 	   	O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)
+# Add (A;;0x1;;;NS) -> 		   	O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)(A;;0x1;;;NS)
+# wevtutil set-log security /ca:’	O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)(A;;0x1;;;S-1-5-20)’
+# sysmon entry on win10 		   	O:BAG:SYD:(A;;0xf0007;;;SY)(A;;0x7;;;BA)(A;;0x1;;;BO)(A;;0x1;;;SO)(A;;0x1;;;S-1-5-32-573)
+# sysmon channel on 2012R2		O:BAG:SYD:(A;;0xf0007;;;SY)(A;;0x7;;;BA)(A;;0x1;;;BO)(A;;0x1;;;SO)(A;;0x1;;;S-1-5-32-573)
+# 								add	(A;;0x1;;;NS)
+#wevtutil set-log Microsoft-Windows-Sysmon/Operational /ca:'O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)(A;;0x1;;;S-1-5-20)(A;;0x1;;;NS)'
+#wevtutil set-log security /ca:'O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)(A;;0x1;;;NS)'
+# Grant the Network Service account READ access to the event log by appending (A;;0x1;;;NS)
 
 # Create Group for Special Logon Auditing (Event ID 4964). Add Suspects to Group.
 $specialAuditGroup = 'SpecialAudit'
@@ -75,12 +102,14 @@ regKey,name,value,type
 "HKLM:\Software\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
 "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
 "HKLM:\SOFTWARE\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
-"HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
-"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","EnableTranscripting",1,"DWord"
-"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
-"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
-"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
 "@
+
+# Testing without Wow6432Node registry keys... keys are replicated automatically.
+#"HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
+#"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","EnableTranscripting",1,"DWord"
+#"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\Transcription","OutputDirectory",$transcriptDirectory,"String"
+#"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging","EnableScriptBlockLogging",1,"DWord"
+#"HKLM:\SOFTWARE\Wow6432Node\Policies\Microsoft\Windows\EventLog\EventForwarding\SubscriptionManager",1,"Server=http://$collectorServer`:5985/wsman/SubscriptionManager/WEC,Refresh=10","String"
 
 
 $sysmonConfig = Get-Content $sysmonConfigFile
@@ -91,7 +120,16 @@ function Configure-Sensors
 
 	foreach ($i in $targetSystems)
 	{
+		if (Test-WSMan -ComputerName $i) {
+			Write-Warning "WinRM is Enabled on $i"
+		}
+		else {
+			Write-Error "Issue with WinRM on $i"
+			Exit
+		}
+
 		$s = New-PSSession -ComputerName $i
+
 	# Audit Config
 		# Backup Current Audit Config to C:\<hostname>.auditpolicy.orig.csv
 		# Set New Audit Policy
@@ -110,9 +148,15 @@ function Configure-Sensors
 	# PowerShell and WEF Config
 		$regBackup = @()
 
+		# Add Network Service to Event Log Readers Group to enable WEF
+		Invoke-Command -Session $s -ScriptBlock {
+			&net localgroup "Event Log Readers" "NT AUTHORITY\NETWORK SERVICE" /add
+		}
+
 		# Iterate over array of objects containing desired registry configurations, document original config
 		$regBackup = Invoke-Command -Session $s -Script {
 			param([string[]]$regConfig)
+			$wecNum = 1
 			$regConfig | ConvertFrom-Csv | ForEach-Object {
 				if (-Not (Test-Path $_.regKey)) {
 					# Registry path does not exist -> create and document DNE
@@ -191,6 +235,10 @@ function Configure-Sensors
 			}
 		} -Args (,$sysmonConfig)
 
+		# Grant the Network Service account READ access to the event log by appending (A;;0x1;;;NS)
+		Invoke-Command -Session $s -ScriptBlock {
+			wevtutil set-log Microsoft-Windows-Sysmon/Operational /ca:'O:BAG:SYD:(A;;0xf0005;;;SY)(A;;0x5;;;BA)(A;;0x1;;;S-1-5-32-573)(A;;0x1;;;S-1-5-20)(A;;0x1;;;NS)'
+		}
 
 	# Backup all configs to single .ps1 file named <hostname>.config.ps1
 		# Backup original audit configuration
@@ -277,11 +325,7 @@ function Restore-Sensors
 			Write-Warning "Sysmon present before deployment. Do nothing."
 		}
 
-
 	# Cleanup Session
 		Remove-PSSession $s
 	}
 }
-
-
-

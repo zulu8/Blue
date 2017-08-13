@@ -12,6 +12,7 @@ These instructions will get you a copy of the project up and running on your loc
 * Windows 7/2008r2+
 * Administrator credentials
 * Designated system for collection
+* Target Systems are WinRM enabled
 
 ### Initial Configuration
 
@@ -99,4 +100,3 @@ See also the list of [contributors](https://github.com/zulu8/Blue/graphs/contrib
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
 
 ## Acknowledgments
-
