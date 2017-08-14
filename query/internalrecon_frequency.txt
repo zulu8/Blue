@@ -1,0 +1,24 @@
+Description:
+	Search for events where threat uses windows built in binaries for internal reconnaissance and situational awareness. This search can be done with Sysmon events with minor changes. Requires tuning for your environment.
+Requires:
+	Command Line:
+		&auditpol.exe /set /subcategory:"Process Creation" /success:enable
+	Registry (or gpo):
+		"HKLM:\Software\Microsoft\Windows\CurrentVersion\Policies\System\Audit","ProcessCreationIncludeCmdLine_Enabled",1,"DWord"
+	WEF Subscription:
+		<QueryList>
+		  <Query Id="0" Path="Security">
+		    <Select Path="Security">*[System[(EventID=4688)]]</Select>
+		  </Query>
+		</QueryList>
+
+Search:
+	source="WinEventLog:ForwardedEvents" index="wineventlog" (EventCode=4688) Process_Command_Line="*"
+		| eval Process_Command_Line=lower(Process_Command_Line)
+		| search Process_Command_Line=*ipconfig* OR Process_Command_Line=*netstat* OR Process_Command_Line=*net.exe* OR Process_Command_Line=*whoami* OR Process_Command_Line=*nbtstat* OR Process_Command_Line=*hostname*  OR Process_Command_Line=*tasklist*
+		| bin _time span=15m
+		| stats dc(Process_Command_Line) AS cmd_count values(ComputerName) values("Account_Name") values(Process_Command_Line) values(Creator_Process_Name) count by _time
+		| where cmd_count > 2
+
+Credit:
+	FIRST 2017 | Advanced Incident Detection and Threat Hunting using Sysmon and Splunk | Tom Ueltschi | TLP-WHITE
